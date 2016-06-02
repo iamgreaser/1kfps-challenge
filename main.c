@@ -530,9 +530,10 @@ int main(int argc, char *argv[])
 		if(cz1 < 0) { cz1 = 0; }
 		if(cz2 >= VXL_CZ) { cz2 = VXL_CZ; }
 
-		glUniformMatrix4fv(glGetUniformLocation(shader_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glBindVertexArray(tri_vao);
+		glUniformMatrix4fv(glGetUniformLocation(shader_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
+		glUniform3fv(glGetUniformLocation(shader_prog, "campos"), 1, pvecB);
 		int cx, cz;
 		for(cz = cz1; cz < cz2; cz++) {
 			int czdiff = (cz-ccz);
@@ -548,7 +549,7 @@ int main(int argc, char *argv[])
 				float fz1 = (cz+0)*VXL_CSIZE;
 				float fx2 = (cx+1)*VXL_CSIZE;
 				float fz2 = (cz+1)*VXL_CSIZE;
-				if(1 && !(1
+				if(0 && !(1
 					&& fx1-VXL_CSIZE <= pvecB[0]
 					&& pvecB[0] <= fx2+VXL_CSIZE
 					&& fz1-VXL_CSIZE <= pvecB[2]

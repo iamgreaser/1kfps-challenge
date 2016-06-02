@@ -2,20 +2,22 @@
 
 const float FOG_LIMIT = 128.0;
 
+uniform vec3 campos;
+
 in vec3 g_col;
-in vec3 g_snorm;
-in vec3 g_spos;
+in vec3 g_wnorm;
+in vec3 g_wpos;
 out vec4 f_col;
 
 void main()
 {
-	vec3 posdir = normalize(g_spos);
-	vec3 ldir = normalize(g_spos);
-	float diff = max(0.0, -dot(g_snorm, ldir));
+	vec3 posdir = normalize(g_wpos - campos);
+	vec3 ldir = normalize(g_wpos - campos);
+	float diff = max(0.0, -dot(g_wnorm, ldir));
 
 	vec3 sdir = posdir-2.0*dot(ldir,posdir)*ldir;
-	float spec = max(0.0, dot(g_snorm, sdir));
-	float dist = length(g_spos);
+	float spec = max(0.0, dot(g_wnorm, sdir));
+	float dist = length(g_wpos - campos);
 
 	const float amb = 0.1;
 	float ambdiff = amb + (1.0-amb)*diff;
