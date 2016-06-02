@@ -1,4 +1,6 @@
-#version 430
+#version 330
+
+const float FOG_LIMIT = 128.0;
 
 in vec3 g_col;
 in vec3 g_snorm;
@@ -20,8 +22,8 @@ void main()
 	f_col = vec4(mix(
 		g_col*ambdiff + vec3(1.0)*pow(spec, 128.0),
 		vec3(192.0/255.0, 232.0/255.0, 255.0/255.0),
-		min(1.0, pow(dist/127.5, 2.0))), 1.0);
-	f_col = vec4(g_col*ambdiff, 1.0);
+		min(1.0, pow(dist/FOG_LIMIT, 2.0))), 1.0);
+	//f_col = vec4(g_col*ambdiff, 1.0);
 	
 	//f_col = vec4(g_col, 1.0);
 	//f_col = vec4(g_snorm*0.5+0.5, 1.0);

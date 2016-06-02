@@ -12,8 +12,8 @@
 // from https://github.com/datenwolf/linmath.h
 #include "linmath.h"
 
-#define INIT_WIDTH 1280
-#define INIT_HEIGHT 720
+#define INIT_WIDTH 800
+#define INIT_HEIGHT 600
 
 SDL_Window *window;
 SDL_GLContext context;
@@ -32,7 +32,6 @@ int key_rxn = 0;
 
 GLuint tri_vao;
 GLuint tri_vbo;
-GLuint tri_vbo_indices;
 struct cubept {
 	GLuint v,c;
 };
@@ -64,19 +63,24 @@ GLuint tri_mesh_indices[] = {
 	*/
 };
 
+#define FOG_LIMIT 128
 #define VXL_LX 512
 #define VXL_LZ 512
 #define VXL_LY 256
-//define VXL_LY_BMASK ((VXL_LY+31)>>5)
-#define VXL_LY_BMASK 8
+#define VXL_LY_BMASK ((VXL_LY+31)>>5)
+#define VXL_CSIZE 32
+#define VXL_CX ((VXL_LX+VXL_CSIZE-1)/VXL_CSIZE)
+#define VXL_CZ ((VXL_LZ+VXL_CSIZE-1)/VXL_CSIZE)
 uint8_t *vxl_data[VXL_LZ][VXL_LX];
 int vxl_data_len[VXL_LZ][VXL_LX];
+int vxl_chunk_offs[VXL_CZ][VXL_CX];
+int vxl_chunk_len[VXL_CZ][VXL_CX];
+int vxl_chunk_ymin[VXL_CZ][VXL_CX];
+int vxl_chunk_ymax[VXL_CZ][VXL_CX];
 uint32_t vxl_data_bitmasks[VXL_LZ][VXL_LX][VXL_LY_BMASK];
 
 int vxl_cube_count = 0;
-int vxl_index_count = 0;
 struct cubept *vxl_mesh_points = NULL;
-GLuint *vxl_mesh_indices = NULL;
 
 GLuint shader_prog;
 
@@ -268,12 +272,17 @@ void load_vxl(const char *fname)
 	printf("Generating mesh for %d cubes\n", vxl_cube_count);
 
 	vxl_mesh_points = malloc(sizeof(tri_mesh_points)*vxl_cube_count);
-	vxl_mesh_indices = malloc(sizeof(tri_mesh_indices)*vxl_cube_count);
 	int mi = 0;
-	int ii = 0;
 
-	for(z = 0; z < VXL_LZ; z++) {
-	for(x = 0; x < VXL_LX; x++) {
+	int cz, cx;
+	
+	for(cz = 0; cz < VXL_CZ; cz++) {
+	for(cx = 0; cx < VXL_CX; cx++) {
+		vxl_chunk_offs[cz][cx] = mi;
+		int cymin = 255;
+		int cymax = 0;
+	for(z = cz*VXL_CSIZE; z < (cz+1)*VXL_CSIZE; z++) {
+	for(x = cx*VXL_CSIZE; x < (cx+1)*VXL_CSIZE; x++) {
 		int y, j;
 
 		uint8_t *p = vxl_data[z][x];
@@ -288,46 +297,30 @@ void load_vxl(const char *fname)
 			int flen = e-s+1;
 			for(y = s; y <= e; y++) {
 				SDL_assert_release(mi < vxl_cube_count);
+				if(y < cymin) { cymin = y; }
+				if(y > cymax) { cymax = y; }
 				GLuint moffs = (z<<20)|((256-y)<<10)|(x<<0);
-				for(j = 0; j < 8; j++) {
-					memcpy(&vxl_mesh_points[mi*8+j].v,
-						&tri_mesh_points[j], sizeof(GLuint));
-					memcpy(&vxl_mesh_points[mi*8+j].c,
-						p+4*(y-s+1), sizeof(GLuint));
-					vxl_mesh_points[mi*8+j].v += moffs;
-				}
-
+				vxl_mesh_points[mi].v = moffs;
+				memcpy(&vxl_mesh_points[mi].c,
+					p+4*(y-s+1), sizeof(GLuint));
+				vxl_mesh_points[mi].c &= 0x00FFFFFF;
 				if(!mask_is_set(x-1,y,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[0*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x01<<24);
 				}
 				if(!mask_is_set(x+1,y,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[1*6+j];
-				}
-				}
-
-				if(!mask_is_set(x,y-1,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[2*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x08<<24);
 				}
 				if(!mask_is_set(x,y+1,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[3*6+j];
+					vxl_mesh_points[mi].c |= (0x02<<24);
 				}
+				if(!mask_is_set(x,y-1,z)) {
+					vxl_mesh_points[mi].c |= (0x10<<24);
 				}
-
 				if(!mask_is_set(x,y,z-1)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[4*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x04<<24);
 				}
 				if(!mask_is_set(x,y,z+1)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[5*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x20<<24);
 				}
 				mi++;
 			}
@@ -342,59 +335,49 @@ void load_vxl(const char *fname)
 
 			for(y = a-clen; y < a; y++) {
 				SDL_assert_release(mi < vxl_cube_count);
+				if(y < cymin) { cymin = y; }
+				if(y > cymax) { cymax = y; }
 				GLuint moffs = (z<<20)|((256-y)<<10)|(x<<0);
-				for(j = 0; j < 8; j++) {
-					memcpy(&vxl_mesh_points[mi*8+j].v,
-						&tri_mesh_points[j], sizeof(GLuint));
-					memcpy(&vxl_mesh_points[mi*8+j].c,
-						p+4*(y-a), sizeof(GLuint));
-					vxl_mesh_points[mi*8+j].v += moffs;
-				}
-
+				vxl_mesh_points[mi].v = moffs;
+				memcpy(&vxl_mesh_points[mi].c,
+					p+4*(y-a), sizeof(GLuint));
+				vxl_mesh_points[mi].c &= 0x00FFFFFF;
 				if(!mask_is_set(x-1,y,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[0*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x01<<24);
 				}
 				if(!mask_is_set(x+1,y,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[1*6+j];
-				}
-				}
-
-				if(!mask_is_set(x,y-1,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[2*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x08<<24);
 				}
 				if(!mask_is_set(x,y+1,z)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[3*6+j];
+					vxl_mesh_points[mi].c |= (0x02<<24);
 				}
+				if(!mask_is_set(x,y-1,z)) {
+					vxl_mesh_points[mi].c |= (0x10<<24);
 				}
-
 				if(!mask_is_set(x,y,z-1)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[4*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x04<<24);
 				}
 				if(!mask_is_set(x,y,z+1)) {
-				for(j = 0; j < 6; j++) {
-					vxl_mesh_indices[ii++] = mi*8+tri_mesh_indices[5*6+j];
-				}
+					vxl_mesh_points[mi].c |= (0x20<<24);
 				}
 				mi++;
 			}
 		}
 	}
 	}
-	vxl_index_count = ii;
+		vxl_chunk_len[cz][cx] = mi - vxl_chunk_offs[cz][cx];
+		vxl_chunk_ymin[cz][cx] = cymin;
+		vxl_chunk_ymax[cz][cx] = cymax;
+	}
+	}
 
-	printf("VXL done! %d cubes, %d/%d indices\n", mi, ii, vxl_cube_count*6*6);
+	printf("VXL done! %d cubes\n", mi);
 }
 
 int main(int argc, char *argv[])
 {
+	int i;
+
 	SDL_assert_release(argc > 1);
 
 	(void)argc;
@@ -440,7 +423,7 @@ int main(int argc, char *argv[])
 	mat4x4 Mcam_roty, Mcam_iroty;
 	mat4x4 Mcam_rotx, Mcam_irotx;
 	mat4x4_identity(Mproj);
-	mat4x4_perspective(Mproj, M_PI/2.0f, INIT_WIDTH/(float)INIT_HEIGHT, 0.02f, 400.0f);
+	mat4x4_perspective(Mproj, 90.0f*M_PI/180.0f, INIT_WIDTH/(float)INIT_HEIGHT, 0.02f, FOG_LIMIT);
 	glUniformMatrix4fv(glGetUniformLocation(shader_prog, "Mproj"), 1, GL_FALSE, Mproj[0]);
 
 	mat4x4_identity(Mcam_roty);
@@ -456,16 +439,12 @@ int main(int argc, char *argv[])
 	glBindBuffer(GL_ARRAY_BUFFER, tri_vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(tri_mesh_points)*vxl_cube_count,
 		vxl_mesh_points, GL_STATIC_DRAW);
-	glGenBuffers(1, &tri_vbo_indices);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tri_vbo_indices);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(tri_mesh_indices)*vxl_cube_count,
-		vxl_mesh_indices, GL_STATIC_DRAW);
 	GLuint a_vtx = glGetAttribLocation(shader_prog, "a_vtx");
 	GLuint a_col = glGetAttribLocation(shader_prog, "a_col");
 	glBindBuffer(GL_ARRAY_BUFFER, tri_vbo);
 	glVertexAttribPointer(a_vtx, 4, GL_UNSIGNED_INT_2_10_10_10_REV, GL_FALSE, sizeof(struct cubept),
 		&(((struct cubept *)0)->v));
-	glVertexAttribPointer(a_col, 3, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(struct cubept),
+	glVertexAttribPointer(a_col, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(struct cubept),
 		&(((struct cubept *)0)->c));
 	glEnableVertexAttribArray(a_vtx);
 	glEnableVertexAttribArray(a_col);
@@ -478,14 +457,26 @@ int main(int argc, char *argv[])
 		255.0f/255.0f,
 		1.0f);
 	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_CULL_FACE);
+	//glEnable(GL_CULL_FACE);
+	//glEnable(GL_PROGRAM_POINT_SIZE);
 
-	int nextframe_time = SDL_GetTicks() + 1000;
+	int xradtab[VXL_CX*2+1];
+	memset(xradtab, 0, sizeof(xradtab));
+	for(i = 0; i <= (FOG_LIMIT+VXL_CSIZE-1)/VXL_CSIZE; i++) {
+		int czdiff = (i-1)*VXL_CSIZE;
+		if(czdiff < 0) { czdiff = 0; }
+		int xrad = floor((sqrt(FOG_LIMIT*FOG_LIMIT-czdiff*czdiff)+VXL_CSIZE-1)/VXL_CSIZE);
+		xradtab[VXL_CX+i] = xrad;
+		xradtab[VXL_CX-i] = xrad;
+	}
+
+	int lasttime = SDL_GetTicks();
+	int nextframe_time = lasttime + 1000;
+	double sec_delta = 0.01;
 	int frame_counter = 0;
 	int running = 1;
 	while(running) {
-		double sec_delta = 0.01;
-		double mvspeed = 10.0*sec_delta;
+		double mvspeed = 40.0*sec_delta;
 		double rtspeed = M_PI*2.0*0.5*sec_delta;
 		double mvx = 0.0;
 		double mvy = 0.0;
@@ -512,32 +503,100 @@ int main(int argc, char *argv[])
 		mat4x4_rotate_X(MA, Mcam_rotx, -rtspeed*rtx);
 		mat4x4_dup(Mcam_rotx, MA);
 
-		vec4 svecA = {-mvspeed*mvx, -mvspeed*mvy, -mvspeed*mvz, 1.0f};
+		vec4 svecA = {-mvspeed*mvx, -mvspeed*mvy, -mvspeed*mvz, 0.0f};
+		vec4 dvecA = {0.0f, 0.0f, -1.0f, 0.0f};
+		vec4 pvecA = {0.0f, 0.0f, 0.0f, -1.0f};
 		vec4 svecB;
+		vec4 dvecB;
+		vec4 pvecB;
 		mat4x4_mul(MA, Mcam_iroty, Mcam_irotx);
 		mat4x4_mul_vec4(svecB, MA, svecA);
+		mat4x4_mul_vec4(dvecB, MA, dvecA);
+		float ddvec = sqrtf(0.0f
+			+ dvecB[0]*dvecB[0]
+			//+ dvecB[1]*dvecB[1]
+			+ dvecB[2]*dvecB[2]);
 
 		mat4x4_translate_in_place(Mcam_pos, svecB[0], svecB[1], svecB[2]);
 		mat4x4_mul(MA, Mcam_rotx, Mcam_roty);
 		mat4x4_mul(Mcam, MA, Mcam_pos);
+		mat4x4_mul_vec4(pvecB, Mcam_pos, pvecA);
+
+		int ccx = (int)floor(pvecB[0]/VXL_CSIZE);
+		int ccz = (int)floor(pvecB[2]/VXL_CSIZE);
+		//printf("%d %d\n", ccx, ccz);
+		int cz1 = ccz - (FOG_LIMIT+VXL_CSIZE-1)/VXL_CSIZE;
+		int cz2 = ccz + (FOG_LIMIT+VXL_CSIZE-1)/VXL_CSIZE + 1;
+		if(cz1 < 0) { cz1 = 0; }
+		if(cz2 >= VXL_CZ) { cz2 = VXL_CZ; }
 
 		glUniformMatrix4fv(glGetUniformLocation(shader_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glBindVertexArray(tri_vao);
-		//glDrawElements(GL_TRIANGLE_STRIP, 
-		glDrawElements(GL_TRIANGLES,
-			//vxl_cube_count*(sizeof(tri_mesh_indices)/sizeof(GLuint)),
-			vxl_index_count,
-			GL_UNSIGNED_INT,
-			((GLushort *)0));
+		int cx, cz;
+		for(cz = cz1; cz < cz2; cz++) {
+			int czdiff = (cz-ccz);
+			int xrad = xradtab[VXL_CX+czdiff];
+			int cx1 = ccx - xrad;
+			int cx2 = ccx + xrad + 1;
+			if(cx1 < 0) { cx1 = 0; }
+			if(cx2 >= VXL_CX) { cx2 = VXL_CX; }
+			if(cx1 >= cx2) { continue; }
+
+			for(cx = cx1; cx < cx2; cx++) {
+				float fx1 = (cx+0)*VXL_CSIZE;
+				float fz1 = (cz+0)*VXL_CSIZE;
+				float fx2 = (cx+1)*VXL_CSIZE;
+				float fz2 = (cz+1)*VXL_CSIZE;
+				if(1 && !(1
+					&& fx1-VXL_CSIZE <= pvecB[0]
+					&& pvecB[0] <= fx2+VXL_CSIZE
+					&& fz1-VXL_CSIZE <= pvecB[2]
+					&& pvecB[2] <= fz2+VXL_CSIZE
+					)) {
+					float dx1 = fx1-pvecB[0];
+					float dz1 = fz1-pvecB[0];
+					float dx2 = fx2-pvecB[2];
+					float dz2 = fz2-pvecB[2];
+
+					float d11 = sqrtf(dx1*dx1 + dz1*dz1)*ddvec;
+					float d12 = sqrtf(dx1*dx1 + dz2*dz2)*ddvec;
+					float d21 = sqrtf(dx2*dx2 + dz1*dz1)*ddvec;
+					float d22 = sqrtf(dx2*dx2 + dz2*dz2)*ddvec;
+
+					float a11 = (dvecB[0]*dx1 + dvecB[2]*dz1)/d11;
+					float a12 = (dvecB[0]*dx1 + dvecB[2]*dz2)/d12;
+					float a21 = (dvecB[0]*dx2 + dvecB[2]*dz1)/d21;
+					float a22 = (dvecB[0]*dx2 + dvecB[2]*dz2)/d22;
+
+					float a1 = (a11 > a12 ? a11 : a12);
+					float a2 = (a21 > a22 ? a21 : a22);
+					float amax = (a1 > a2 ? a1 : a2);
+					if(amax < 0.5f) {
+						continue;
+					}
+				}
+
+				int cpos = vxl_chunk_offs[cz][cx];
+				int clen = vxl_chunk_len[cz][cx];
+				if(clen > 0) {
+					glDrawArrays(GL_POINTS, cpos, clen);
+				}
+			}
+		}
 		glBindVertexArray(0);
 
 		SDL_GL_SwapWindow(window);
 		usleep(100);
 		int curframe_time = SDL_GetTicks();
+		sec_delta = ((double)(curframe_time-lasttime))/1000.0;
+		lasttime = curframe_time;
 		frame_counter++;
 		if(curframe_time >= nextframe_time) {
-			printf("%4d FPS\n", frame_counter);
+			char fpsbuf[64];
+			sprintf(fpsbuf, "%4d FPS", frame_counter);
+			printf("%s\n", fpsbuf);
+			SDL_SetWindowTitle(window, fpsbuf);
 			frame_counter = 0;
 			nextframe_time += 1000;
 		}
