@@ -9,37 +9,6 @@ const bool INSTANCED = false; // enable GS instancing (gl_InvocationID, not gl_I
 
 uniform vec3 campos;
 
-const float V0 = 0.0;
-const float V1 = 1.0;
-const float V2 = 1.0/sqrt(2.0);
-const float V3 = 1.0/sqrt(3.0);
-const float DX = 0.0;
-const float DY = 1.0;
-const float DZ = 0.0;
-
-/*
-const vec3[] NORM_TAB = vec3[](
-	vec3( DX, DY, DZ), vec3( V1, V0, V0), vec3(-V1, V0, V0), vec3( DX, DY, DZ),
-	vec3( V0, V1, V0), vec3( V2, V2, V0), vec3(-V2, V2, V0), vec3( V0, V1, V0),
-	vec3( V0,-V1, V0), vec3( V2,-V2, V0), vec3(-V2,-V2, V0), vec3( V0,-V1, V0),
-	vec3( DX, DY, DZ), vec3( V1, V0, V0), vec3(-V1, V0, V0), vec3( DX, DY, DZ),
-
-	vec3( V0, V0, V1), vec3( V2, V0, V2), vec3(-V2, V0, V2), vec3( V0, V0, V1),
-	vec3( V0, V2, V2), vec3( V3, V3, V3), vec3(-V3, V3, V3), vec3( V0, V2, V2),
-	vec3( V0,-V2, V2), vec3( V3,-V3, V3), vec3(-V3,-V3, V3), vec3( V0,-V2, V2),
-	vec3( V0, V0, V1), vec3( V2, V0, V2), vec3(-V2, V0, V2), vec3( V0, V0, V1),
-
-	vec3( V0, V0,-V1), vec3( V2, V0,-V2), vec3(-V2, V0,-V2), vec3( V0, V0,-V1),
-	vec3( V0, V2,-V2), vec3( V3, V3,-V3), vec3(-V3, V3,-V3), vec3( V0, V2,-V2),
-	vec3( V0,-V2,-V2), vec3( V3,-V3,-V3), vec3(-V3,-V3,-V3), vec3( V0,-V2,-V2),
-	vec3( V0, V0,-V1), vec3( V2, V0,-V2), vec3(-V2, V0,-V2), vec3( V0, V0,-V1),
-
-	vec3( DX, DY, DZ), vec3( V1, V0, V0), vec3(-V1, V0, V0), vec3( DX, DY, DZ),
-	vec3( V0, V1, V0), vec3( V2, V2, V0), vec3(-V2, V2, V0), vec3( V0, V1, V0),
-	vec3( V0,-V1, V0), vec3( V2,-V2, V0), vec3(-V2,-V2, V0), vec3( V0,-V1, V0),
-	vec3( DX, DY, DZ), vec3( V1, V0, V0), vec3(-V1, V0, V0), vec3( DX, DY, DZ));
-*/
-
 // tests for Mesa 12.1/13.0, whichever it's going to be called
 // once this bug is fixed i'll switch the ver back to 430
 //const float[] EXAMPLE1 = {1.0, 2.0, 3.0};
@@ -57,10 +26,28 @@ const vec3[] NORM_TAB = vec3[](
 uniform mat4 Mproj, Mcam;
 in vec3 v_col[1];
 in int v_nmask[1];
-in int v_kill[1];
 out vec3 g_col;
 out vec3 g_wnorm;
 out vec3 g_wpos;
+
+void ptemit(vec3 ppos)
+{
+	gl_Position = Mproj * Mcam * vec4(ppos, 1.0);
+	g_wpos = ppos;
+	EmitVertex();
+}
+
+void quademit(vec3 bpos, vec3 norm, vec3 bcol)
+{
+	g_col = bcol;
+	g_wnorm = norm;
+	vec3 hnorm = norm/2.0;
+	ptemit(bpos + hnorm - hnorm.yzx - hnorm.zxy);
+	ptemit(bpos + hnorm + hnorm.yzx - hnorm.zxy);
+	ptemit(bpos + hnorm - hnorm.yzx + hnorm.zxy);
+	ptemit(bpos + hnorm + hnorm.yzx + hnorm.zxy);
+	EndPrimitive();
+}
 
 void main()
 {
@@ -73,7 +60,7 @@ void main()
 	const vec3 shade_n = vec3(shade_xn, shade_yn, shade_zn);
 	const vec3 shade_p = vec3(shade_xp, shade_yp, shade_zp);
 
-	if(v_kill[0] > 0) {
+	{
 		vec3 bpos = gl_in[0].gl_Position.xyz;
 		vec3 bcol = v_col[0];
 		int nmask = v_nmask[0];
@@ -87,60 +74,24 @@ void main()
 		float shade_y = shade_yn;
 		float shade_z = shade_zn;
 
-		if((!INSTANCED)  || gl_InvocationID == 0) {
+		if((!INSTANCED) || gl_InvocationID == 0) {
 		if((!CULL_FACE) || (nmask & 0x01) != 0) {
-	if((nmask & 0x08) != 0) { nvx = -nvx; shade_x = shade_xp; }
-	g_col = bcol * shade_x;
-	vec3 norm = -nvx;
-	g_wnorm = norm;
-	vec3 hnorm = norm/2.0;
-	ppos = ((bpos + hnorm - hnorm.yzx - hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm + hnorm.yzx - hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm - hnorm.yzx + hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm + hnorm.yzx + hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	EndPrimitive();
+			if((nmask & 0x08) != 0) { nvx = -nvx; shade_x = shade_xp; }
+			quademit(bpos, -nvx, bcol * shade_x);
 		}
 		}
 
 		if((!INSTANCED)  || gl_InvocationID == 1) {
 		if((!CULL_FACE) || (nmask & 0x02) != 0) {
-	if((nmask & 0x10) != 0) { nvy = -nvy; shade_y = shade_yp; }
-	g_col = bcol * shade_y;
-	vec3 norm = -nvy;
-	g_wnorm = norm;
-	vec3 hnorm = norm/2.0;
-	ppos = ((bpos + hnorm - hnorm.yzx - hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm + hnorm.yzx - hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm - hnorm.yzx + hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm + hnorm.yzx + hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	EndPrimitive();
+			if((nmask & 0x10) != 0) { nvy = -nvy; shade_y = shade_yp; }
+			quademit(bpos, -nvy, bcol * shade_y);
 		}
 		}
 
 		if((!INSTANCED)  || gl_InvocationID == 2) {
 		if((!CULL_FACE) || (nmask & 0x04) != 0) {
-	if((nmask & 0x20) != 0) { nvz = -nvz; shade_z = shade_zp; }
-	g_col = bcol * shade_z;
-	vec3 norm = -nvz;
-	g_wnorm = norm;
-	vec3 hnorm = norm/2.0;
-	ppos = ((bpos + hnorm - hnorm.yzx - hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm + hnorm.yzx - hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm - hnorm.yzx + hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	ppos = ((bpos + hnorm + hnorm.yzx + hnorm.zxy)).xyz; g_wpos = ppos;
-	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
-	EndPrimitive();
+			if((nmask & 0x20) != 0) { nvz = -nvz; shade_z = shade_zp; }
+			quademit(bpos, -nvz, bcol * shade_z);
 		}
 		}
 	}

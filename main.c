@@ -30,8 +30,14 @@ int key_ryn = 0;
 int key_rxp = 0;
 int key_rxn = 0;
 
-GLuint tri_vao;
-GLuint tri_vbo;
+GLuint chunkcull_vao;
+GLuint chunkcull_vbo_data;
+GLuint chunkcull_vbo_indirect;
+GLuint chunkcull_vbo_len;
+GLuint chunkcull_vbo_offs;
+
+GLuint mesh_vao;
+GLuint mesh_vbo;
 struct cubept {
 	GLuint v,c;
 };
@@ -82,7 +88,8 @@ uint32_t vxl_data_bitmasks[VXL_LZ][VXL_LX][VXL_LY_BMASK];
 int vxl_cube_count = 0;
 struct cubept *vxl_mesh_points = NULL;
 
-GLuint shader_prog;
+GLuint chunkcull_prog;
+GLuint base_prog;
 
 void show_shader_log(GLuint shader, const char *desc)
 {
@@ -153,6 +160,7 @@ void add_shader(GLuint program, const char *fname, GLenum category)
 
 	switch(category)
 	{
+		case GL_COMPUTE_SHADER: catheader = "COMPUTE SHADER"; break;
 		case GL_VERTEX_SHADER: catheader = "VERTEX SHADER"; break;
 		case GL_TESS_CONTROL_SHADER: catheader = "TESSELATION CONTROL SHADER"; break;
 		case GL_TESS_EVALUATION_SHADER: catheader = "TESSELATION EVALUATION SHADER"; break;
@@ -167,7 +175,7 @@ void add_shader(GLuint program, const char *fname, GLenum category)
 	glShaderSource(shader_obj, 1, &src_str_cast, NULL);
 	glCompileShader(shader_obj);
 	show_shader_log(shader_obj, catheader);
-	glAttachShader(shader_prog, shader_obj);
+	glAttachShader(program, shader_obj);
 }
 
 int mask_is_set(int x, int y, int z)
@@ -409,14 +417,19 @@ int main(int argc, char *argv[])
 
 	load_vxl(argv[1]);
 
-	shader_prog = glCreateProgram();
-	add_shader(shader_prog, "base.vert.glsl", GL_VERTEX_SHADER);
-	add_shader(shader_prog, "base.geom.glsl", GL_GEOMETRY_SHADER);
-	add_shader(shader_prog, "base.frag.glsl", GL_FRAGMENT_SHADER);
-	glBindFragDataLocation(shader_prog, 0, "f_col");
-	glLinkProgram(shader_prog);
-	show_program_log(shader_prog, "PROGRAM LINK");
-	glUseProgram(shader_prog);
+	chunkcull_prog = glCreateProgram();
+	add_shader(chunkcull_prog, "chunkcull.comp.glsl", GL_COMPUTE_SHADER);
+	glLinkProgram(chunkcull_prog);
+	show_program_log(chunkcull_prog, "PROGRAM LINK");
+
+	base_prog = glCreateProgram();
+	add_shader(base_prog, "base.vert.glsl", GL_VERTEX_SHADER);
+	add_shader(base_prog, "base.geom.glsl", GL_GEOMETRY_SHADER);
+	add_shader(base_prog, "base.frag.glsl", GL_FRAGMENT_SHADER);
+	glBindFragDataLocation(base_prog, 0, "f_col");
+	glLinkProgram(base_prog);
+	show_program_log(base_prog, "PROGRAM LINK");
+	glUseProgram(base_prog);
 
 	mat4x4 Mproj, Mcam, MA, MB;
 	mat4x4 Mcam_pos;
@@ -424,8 +437,6 @@ int main(int argc, char *argv[])
 	mat4x4 Mcam_rotx, Mcam_irotx;
 	mat4x4_identity(Mproj);
 	mat4x4_perspective(Mproj, 90.0f*M_PI/180.0f, INIT_WIDTH/(float)INIT_HEIGHT, 0.02f, FOG_LIMIT+3);
-	glUniformMatrix4fv(glGetUniformLocation(shader_prog, "Mproj"), 1, GL_FALSE, Mproj[0]);
-
 	mat4x4_identity(Mcam_roty);
 	mat4x4_identity(Mcam_rotx);
 	mat4x4_identity(Mcam_iroty);
@@ -433,15 +444,50 @@ int main(int argc, char *argv[])
 	mat4x4_identity(Mcam_pos);
 	mat4x4_translate_in_place(Mcam_pos, -256.5f, -240.0f, -256.5f);
 
-	glGenVertexArrays(1, &tri_vao);
-	glBindVertexArray(tri_vao);
-	glGenBuffers(1, &tri_vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, tri_vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(tri_mesh_points)*vxl_cube_count,
+	// Set up main VAO
+	glGenVertexArrays(1, &mesh_vao);
+	glBindVertexArray(mesh_vao);
+	glGenBuffers(1, &mesh_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, mesh_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(struct cubept)*vxl_cube_count,
 		vxl_mesh_points, GL_STATIC_DRAW);
-	GLuint a_vtx = glGetAttribLocation(shader_prog, "a_vtx");
-	GLuint a_col = glGetAttribLocation(shader_prog, "a_col");
-	glBindBuffer(GL_ARRAY_BUFFER, tri_vbo);
+	GLuint a_vtx = glGetAttribLocation(base_prog, "a_vtx");
+	GLuint a_col = glGetAttribLocation(base_prog, "a_col");
+	glBindBuffer(GL_ARRAY_BUFFER, mesh_vbo);
+	glBindVertexArray(0);
+
+	// Set up chunkcull VAO
+	glGenVertexArrays(1, &chunkcull_vao);
+	glBindVertexArray(chunkcull_vao);
+	glGenBuffers(1, &chunkcull_vbo_data);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(struct cubept)*(vxl_cube_count+1024),
+		NULL, GL_STREAM_COPY);
+	glGenBuffers(1, &chunkcull_vbo_indirect);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_indirect);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*4*VXL_CX*VXL_CZ,
+		NULL, GL_STREAM_COPY);
+	glGenBuffers(1, &chunkcull_vbo_len);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_len);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
+		vxl_chunk_len, GL_STATIC_DRAW);
+	glGenBuffers(1, &chunkcull_vbo_offs);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_offs);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
+		vxl_chunk_offs, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, mesh_vbo);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkcull_vbo_len);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, chunkcull_vbo_offs);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunkcull_vbo_data);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, chunkcull_vbo_indirect);
+	glBindVertexArray(0);
+
+	// Adjust main VAO
+	glBindVertexArray(mesh_vao);
+	glBindBuffer(GL_DRAW_INDIRECT_BUFFER, chunkcull_vbo_indirect);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data);
+	//glBindBuffer(GL_ARRAY_BUFFER, mesh_vbo);
 	glVertexAttribPointer(a_vtx, 4, GL_UNSIGNED_INT_2_10_10_10_REV, GL_FALSE, sizeof(struct cubept),
 		&(((struct cubept *)0)->v));
 	glVertexAttribPointer(a_col, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(struct cubept),
@@ -449,7 +495,6 @@ int main(int argc, char *argv[])
 	glEnableVertexAttribArray(a_vtx);
 	glEnableVertexAttribArray(a_col);
 	glBindVertexArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	glClearColor(
 		192.0f/255.0f,
@@ -531,9 +576,19 @@ int main(int argc, char *argv[])
 		if(cz2 >= VXL_CZ) { cz2 = VXL_CZ; }
 
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glBindVertexArray(tri_vao);
-		glUniformMatrix4fv(glGetUniformLocation(shader_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
-		glUniform3fv(glGetUniformLocation(shader_prog, "campos"), 1, pvecB);
+		glUseProgram(chunkcull_prog);
+		glUniformMatrix4fv(glGetUniformLocation(chunkcull_prog, "Mproj"), 1, GL_FALSE, Mproj[0]);
+
+		glUniformMatrix4fv(glGetUniformLocation(chunkcull_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
+		glUniform3fv(glGetUniformLocation(chunkcull_prog, "campos"), 1, pvecB);
+		glBindVertexArray(chunkcull_vao);
+		glDispatchCompute(VXL_CX, VXL_CZ, 1);
+		glFinish(); // MANDATORY - otherwise things break HORRIBLY!
+		glUseProgram(base_prog);
+		glBindVertexArray(mesh_vao);
+		glUniformMatrix4fv(glGetUniformLocation(base_prog, "Mproj"), 1, GL_FALSE, Mproj[0]);
+		glUniformMatrix4fv(glGetUniformLocation(base_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
+		glUniform3fv(glGetUniformLocation(base_prog, "campos"), 1, pvecB);
 		int cx, cz;
 		for(cz = cz1; cz < cz2; cz++) {
 			int czdiff = (cz-ccz);
@@ -578,11 +633,13 @@ int main(int argc, char *argv[])
 					}
 				}
 
-				int cpos = vxl_chunk_offs[cz][cx];
-				int clen = vxl_chunk_len[cz][cx];
-				if(clen > 0) {
-					glDrawArrays(GL_POINTS, cpos, clen);
-				}
+				glDrawArraysIndirect(GL_POINTS, &(((GLuint *)0)[4*(cx+cz*VXL_CZ)]));
+
+				//int cpos = vxl_chunk_offs[cz][cx];
+				//int clen = vxl_chunk_len[cz][cx];
+				//if(clen > 0) {
+					//glDrawArrays(GL_POINTS, cpos, clen);
+				//}
 			}
 		}
 		glBindVertexArray(0);
