@@ -1,4 +1,5 @@
-#version 330
+#version 400
+//extension GL_ARB_cull_distance: require
 
 const float FOG_LIMIT = 128.0;
 
@@ -12,8 +13,7 @@ out int v_nmask;
 
 void main()
 {
-	gl_Position = vec4(a_vtx, 1.0);
-	//gl_Position = vec4(a_vtx, 1.0);
+	gl_Position = vec4(a_vtx + vec3(0.5), 1.0);
 	float z0 = length(a_vtx + vec3(0.5) - campos);
 	//float f0 = -normalize((Mcam * gl_Position).xyz).z;
 	vec4 ppoint4 = (Mproj * ((Mcam * vec4(a_vtx + vec3(0.5), 1.0)) + vec4(0.0, 0.0, -2.0, 0.0)));
@@ -27,7 +27,14 @@ void main()
 	if(v_kill > 0) {
 		v_col = a_col.bgr/255.0;
 		int nmask = int(floor(a_col.a+0.5));
-		v_nmask = nmask;
+		vec3 sidevec = (a_vtx + vec3(0.5)) - campos;
+		int rnmask = 0;
+		if(sidevec.x < 0.0) { rnmask |= 0x08; }
+		if(sidevec.y < 0.0) { rnmask |= 0x10; }
+		if(sidevec.z < 0.0) { rnmask |= 0x20; }
+		rnmask |= ((nmask&0x07)&~(rnmask>>3));
+		rnmask |= (((nmask>>3)&0x07)&(rnmask>>3));
+		v_nmask = rnmask;//^0x38;
 	}
 }
 

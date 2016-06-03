@@ -27,7 +27,14 @@ void main()
 		min(1.0, pow(dist/FOG_LIMIT, 2.0))), 1.0);
 	//f_col = vec4(g_col*ambdiff, 1.0);
 	
-	//f_col = vec4(g_col, 1.0);
 	//f_col = vec4(g_snorm*0.5+0.5, 1.0);
+
+	if(true) {
+		f_col = vec4(mix(
+			g_col,
+			vec3(192.0/255.0, 232.0/255.0, 255.0/255.0),
+			min(1.0, pow(dist/FOG_LIMIT, 2.0))), 1.0);
+	}
+	//f_col = vec4(g_col, 1.0); // bypass-mode
 }
 

@@ -423,7 +423,7 @@ int main(int argc, char *argv[])
 	mat4x4 Mcam_roty, Mcam_iroty;
 	mat4x4 Mcam_rotx, Mcam_irotx;
 	mat4x4_identity(Mproj);
-	mat4x4_perspective(Mproj, 90.0f*M_PI/180.0f, INIT_WIDTH/(float)INIT_HEIGHT, 0.02f, FOG_LIMIT);
+	mat4x4_perspective(Mproj, 90.0f*M_PI/180.0f, INIT_WIDTH/(float)INIT_HEIGHT, 0.02f, FOG_LIMIT+3);
 	glUniformMatrix4fv(glGetUniformLocation(shader_prog, "Mproj"), 1, GL_FALSE, Mproj[0]);
 
 	mat4x4_identity(Mcam_roty);
