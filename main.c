@@ -36,7 +36,7 @@ int key_ryn = 0;
 int key_rxp = 0;
 int key_rxn = 0;
 
-GLsync chunkcull_sync[BUF_COUNT];
+//GLsync chunkcull_sync[BUF_COUNT];
 GLuint chunkcull_vao[BUF_COUNT];
 GLuint chunkcull_vbo_data[BUF_COUNT];
 GLuint chunkcull_vbo_indirect[BUF_COUNT];
@@ -598,9 +598,13 @@ int main(int argc, char *argv[])
 			1, campos_u[buf_compute]);
 		glBindVertexArray(chunkcull_vao[buf_compute]);
 		glDispatchCompute(VXL_CX, VXL_CZ, 1);
-		chunkcull_sync[buf_compute] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+		//chunkcull_sync[buf_compute] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+		glMemoryBarrier(0
+			|GL_SHADER_STORAGE_BARRIER_BIT
+			|GL_COMMAND_BARRIER_BIT
+			|GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT
+			);
 		buf_compute = (buf_compute+1) % BUF_COUNT;
-		//glFinish(); // MANDATORY - otherwise things break HORRIBLY!
 
 		if(buf_prime > 0) {
 			buf_prime--;
@@ -616,8 +620,8 @@ int main(int argc, char *argv[])
 			glUniform3fv(glGetUniformLocation(base_prog, "campos"),
 				1, campos_u[buf_draw]);
 
-			glWaitSync(chunkcull_sync[buf_draw], 0, GL_TIMEOUT_IGNORED);
-			glDeleteSync(chunkcull_sync[buf_draw]);
+			//glWaitSync(chunkcull_sync[buf_draw], 0, GL_TIMEOUT_IGNORED);
+			//glDeleteSync(chunkcull_sync[buf_draw]);
 
 			int cx, cz;
 			for(cz = cz1; cz < cz2; cz++) {
