@@ -29,7 +29,7 @@ void main()
 	
 	//f_col = vec4(g_snorm*0.5+0.5, 1.0);
 
-	if(true) {
+	if(false) {
 		f_col = vec4(mix(
 			g_col,
 			vec3(192.0/255.0, 232.0/255.0, 255.0/255.0),

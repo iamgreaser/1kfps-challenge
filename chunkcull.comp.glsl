@@ -1,9 +1,9 @@
 #version 430
 
 const float FOG_LIMIT = 128.0;
-const int VXL_CSIZE = 32;
-const int VXL_CX = 512/32;
-const int VXL_CZ = 512/32;
+const int VXL_CSIZE = 8;
+const int VXL_CX = 512/VXL_CSIZE;
+const int VXL_CZ = 512/VXL_CSIZE;
 
 uniform mat4 Mproj, Mcam;
 uniform vec3 campos;
@@ -21,16 +21,29 @@ layout(std430, binding=3) buffer buf_data_out {
 	st_data data_out[]; };
 layout(std430, binding=4) buffer buf_indirect_out {
 	st_instance indirect_out[]; };
+layout(std430, binding=5) buffer buf_ymin_in { int ymin_in[]; };
+layout(std430, binding=6) buffer buf_ymax_in { int ymax_in[]; };
+
+const float shade_xn = 0.9;
+const float shade_xp = 0.7;
+const float shade_yn = 0.5;
+const float shade_yp = 1.0;
+const float shade_zn = 0.8;
+const float shade_zp = 0.8;
+
+const int MAP_HEIGHT = 64;
 
 void main()
 {
 	int cx = int(gl_WorkGroupID.x);
 	int cz = int(gl_WorkGroupID.y);
 
-	int dlen  = len_in [cx + VXL_CX*cz];
-	int doffs = offs_in[cx + VXL_CX*cz];
+	int cidx = cx + VXL_CX*cz;
+	int dlen  = len_in [cidx];
+	int doffs = offs_in[cidx];
+	int poffs = doffs*3*3;
 
-	int di = doffs;
+	int di = poffs;
 
 	vec2 rcv = vec2(cx, cz)*float(VXL_CSIZE);
 	rcv -= campos.xz;
@@ -38,7 +51,69 @@ void main()
 	if(rcv.y < 0.0) rcv.y = -rcv.y-float(VXL_CSIZE);
 	float zc = length(rcv);
 
-	if(zc < FOG_LIMIT) {
+	float xratio = (Mproj * vec4(1.0, 0.0, 0.0, 0.0)).x;
+	float yratio = (Mproj * vec4(0.0, 1.0, 0.0, 0.0)).y;
+	vec3 cbox0 = vec3(cx*VXL_CSIZE, 255-ymax_in[cidx], cz*VXL_CSIZE);
+	vec3 cbox1 = vec3((cx+1)*VXL_CSIZE, 257-ymin_in[cidx], (cz+1)*VXL_CSIZE);
+	vec4 cplane0 = vec4(-xratio, 0.0, 1.0, 0.0);
+	vec4 cplane1 = vec4( 0.0,-yratio, 1.0, 0.0);
+	vec4 cplane2 = vec4( xratio, 0.0, 1.0, 0.0);
+	vec4 cplane3 = vec4( 0.0,-yratio, 1.0, 0.0);
+	vec4 campos4 = vec4(campos, 1.0);
+
+	vec4 ccoffs = vec4(0.0);
+	vec4 cbox000 = (Mcam * vec4(cbox0.x, cbox0.y, cbox0.z, 1.0)) + ccoffs;
+	vec4 cbox001 = (Mcam * vec4(cbox0.x, cbox0.y, cbox1.z, 1.0)) + ccoffs;
+	vec4 cbox010 = (Mcam * vec4(cbox0.x, cbox1.y, cbox0.z, 1.0)) + ccoffs;
+	vec4 cbox011 = (Mcam * vec4(cbox0.x, cbox1.y, cbox1.z, 1.0)) + ccoffs;
+	vec4 cbox100 = (Mcam * vec4(cbox1.x, cbox0.y, cbox0.z, 1.0)) + ccoffs;
+	vec4 cbox101 = (Mcam * vec4(cbox1.x, cbox0.y, cbox1.z, 1.0)) + ccoffs;
+	vec4 cbox110 = (Mcam * vec4(cbox1.x, cbox1.y, cbox0.z, 1.0)) + ccoffs;
+	vec4 cbox111 = (Mcam * vec4(cbox1.x, cbox1.y, cbox1.z, 1.0)) + ccoffs;
+
+	bool cfcull0 = (true
+		&& dot(cplane0, cbox000) > 0.0
+		&& dot(cplane0, cbox001) > 0.0
+		&& dot(cplane0, cbox010) > 0.0
+		&& dot(cplane0, cbox011) > 0.0
+		&& dot(cplane0, cbox100) > 0.0
+		&& dot(cplane0, cbox101) > 0.0
+		&& dot(cplane0, cbox110) > 0.0
+		&& dot(cplane0, cbox111) > 0.0
+		);
+	bool cfcull1 = (true
+		&& dot(cplane1, cbox000) > 0.0
+		&& dot(cplane1, cbox001) > 0.0
+		&& dot(cplane1, cbox010) > 0.0
+		&& dot(cplane1, cbox011) > 0.0
+		&& dot(cplane1, cbox100) > 0.0
+		&& dot(cplane1, cbox101) > 0.0
+		&& dot(cplane1, cbox110) > 0.0
+		&& dot(cplane1, cbox111) > 0.0
+		);
+	bool cfcull2 = (true
+		&& dot(cplane2, cbox000) > 0.0
+		&& dot(cplane2, cbox001) > 0.0
+		&& dot(cplane2, cbox010) > 0.0
+		&& dot(cplane2, cbox011) > 0.0
+		&& dot(cplane2, cbox100) > 0.0
+		&& dot(cplane2, cbox101) > 0.0
+		&& dot(cplane2, cbox110) > 0.0
+		&& dot(cplane2, cbox111) > 0.0
+		);
+	bool cfcull3 = (true
+		&& dot(cplane3, cbox000) > 0.0
+		&& dot(cplane3, cbox001) > 0.0
+		&& dot(cplane3, cbox010) > 0.0
+		&& dot(cplane3, cbox011) > 0.0
+		&& dot(cplane3, cbox100) > 0.0
+		&& dot(cplane3, cbox101) > 0.0
+		&& dot(cplane3, cbox110) > 0.0
+		&& dot(cplane3, cbox111) > 0.0
+		);
+	bool cfcull = cfcull0 || cfcull1 || cfcull2 || cfcull3;
+
+	if(zc < FOG_LIMIT && !cfcull) {
 	for(int i = 0; i < dlen; i++) {
 		st_data p = data_in[i+doffs];
 		vec3 rv = vec3(
@@ -48,31 +123,106 @@ void main()
 
 		vec3 bpos = rv + vec3(0.5);
 		float z0 = length(bpos - campos);
+		vec4 f0 = Mproj * (Mcam * vec4(bpos, 1.0) + vec4(0.0, 0.0, -4.0, 0.0));
+		vec2 if0 = abs(f0.xy)/max(0.01, f0.w);
+		float f1 = max(if0.x*9.0/16.0, if0.y);
 
-		if(z0 < FOG_LIMIT){
-			vec4 f0 = Mproj * (Mcam * vec4(bpos, 1.0) + vec4(0.0, 0.0, -2.0, 0.0));
-			vec2 if0 = abs(f0.xy)/max(0.01, f0.w);
-			float f1 = max(if0.x*9.0/16.0, if0.y);
+		if(z0 < FOG_LIMIT && f1 < 1.0){
+			int nmask = int((p.c>>24U)&0xFFU);
+			vec3 sidevec = bpos - campos;
+			float nface = -1.0;
+			float pface = 0.0;
 
-			if(f1 < 1.0) {
-				int nmask = int((p.c>>24U)&0xFFU);
-				vec3 sidevec = bpos - campos;
-				int rnmask = 0;
-				if(sidevec.x < 0.0) { rnmask |= 0x08; }
-				if(sidevec.y < 0.0) { rnmask |= 0x10; }
-				if(sidevec.z < 0.0) { rnmask |= 0x20; }
-				rnmask |= ((nmask&0x07)&~(rnmask>>3));
-				rnmask |= (((nmask>>3)&0x07)&(rnmask>>3));
-				p.c = (p.c&0x00FFFFFFU)|(uint(rnmask)<<24U);
-				data_out[di++] = p;
+			if((sidevec.x > pface && (nmask & 0x01) != 0)) {
+				st_data p0 = p, p1 = p, p2 = p, p3 = p;
+				p0.v += (0U<<0U)+(0U<<10U)+(0U<<20U);
+				p1.v += (0U<<0U)+(0U<<10U)+(1U<<20U);
+				p2.v += (0U<<0U)+(1U<<10U)+(0U<<20U);
+				p3.v += (0U<<0U)+(1U<<10U)+(1U<<20U);
+				data_out[di++] = p0;
+				data_out[di++] = p1;
+				data_out[di++] = p2;
+				//data_out[di++] = p3;
+				//data_out[di++] = p2;
+				//data_out[di++] = p1;
+			}
+
+			if((sidevec.y > pface && (nmask & 0x02) != 0)) {
+				st_data p0 = p, p1 = p, p2 = p, p3 = p;
+				p0.v += (0U<<0U)+(0U<<10U)+(0U<<20U);
+				p1.v += (1U<<0U)+(0U<<10U)+(0U<<20U);
+				p2.v += (0U<<0U)+(0U<<10U)+(1U<<20U);
+				p3.v += (1U<<0U)+(0U<<10U)+(1U<<20U);
+				data_out[di++] = p0;
+				data_out[di++] = p1;
+				data_out[di++] = p2;
+				//data_out[di++] = p3;
+				//data_out[di++] = p2;
+				//data_out[di++] = p1;
+			}
+
+			if((sidevec.z > pface && (nmask & 0x04) != 0)) {
+				st_data p0 = p, p1 = p, p2 = p, p3 = p;
+				p0.v += (0U<<0U)+(0U<<10U)+(0U<<20U);
+				p1.v += (0U<<0U)+(1U<<10U)+(0U<<20U);
+				p2.v += (1U<<0U)+(0U<<10U)+(0U<<20U);
+				p3.v += (1U<<0U)+(1U<<10U)+(0U<<20U);
+				data_out[di++] = p0;
+				data_out[di++] = p1;
+				data_out[di++] = p2;
+				//data_out[di++] = p3;
+				//data_out[di++] = p2;
+				//data_out[di++] = p1;
+			}
+
+			if((sidevec.x < nface && (nmask & 0x08) != 0)) {
+				st_data p0 = p, p1 = p, p2 = p, p3 = p;
+				p0.v += (1U<<0U)+(0U<<10U)+(0U<<20U);
+				p1.v += (1U<<0U)+(1U<<10U)+(0U<<20U);
+				p2.v += (1U<<0U)+(0U<<10U)+(1U<<20U);
+				p3.v += (1U<<0U)+(1U<<10U)+(1U<<20U);
+				data_out[di++] = p0;
+				data_out[di++] = p1;
+				data_out[di++] = p2;
+				//data_out[di++] = p3;
+				//data_out[di++] = p2;
+				//data_out[di++] = p1;
+			}
+
+			if((sidevec.y < nface && (nmask & 0x10) != 0)) {
+				st_data p0 = p, p1 = p, p2 = p, p3 = p;
+				p0.v += (0U<<0U)+(1U<<10U)+(0U<<20U);
+				p1.v += (0U<<0U)+(1U<<10U)+(1U<<20U);
+				p2.v += (1U<<0U)+(1U<<10U)+(0U<<20U);
+				p3.v += (1U<<0U)+(1U<<10U)+(1U<<20U);
+				data_out[di++] = p0;
+				data_out[di++] = p1;
+				data_out[di++] = p2;
+				//data_out[di++] = p3;
+				//data_out[di++] = p2;
+				//data_out[di++] = p1;
+			}
+
+			if((sidevec.z < nface && (nmask & 0x20) != 0)) {
+				st_data p0 = p, p1 = p, p2 = p, p3 = p;
+				p0.v += (0U<<0U)+(0U<<10U)+(1U<<20U);
+				p1.v += (1U<<0U)+(0U<<10U)+(1U<<20U);
+				p2.v += (0U<<0U)+(1U<<10U)+(1U<<20U);
+				p3.v += (1U<<0U)+(1U<<10U)+(1U<<20U);
+				data_out[di++] = p0;
+				data_out[di++] = p1;
+				data_out[di++] = p2;
+				//data_out[di++] = p3;
+				//data_out[di++] = p2;
+				//data_out[di++] = p1;
 			}
 		}
 	}
 	}
 
-	indirect_out[cx + VXL_CX*cz].count = min(30000, max(0, di-doffs));
+	indirect_out[cx + VXL_CX*cz].count = min(30000, max(0, di-poffs));
 	indirect_out[cx + VXL_CX*cz].icount = 1;
-	indirect_out[cx + VXL_CX*cz].first = doffs;
+	indirect_out[cx + VXL_CX*cz].first = poffs;
 	indirect_out[cx + VXL_CX*cz].ifirst = 0;
 }
 

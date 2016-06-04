@@ -15,8 +15,14 @@
 #define INIT_WIDTH 800
 #define INIT_HEIGHT 600
 
+#define BUF_COUNT 1
+
 SDL_Window *window;
 SDL_GLContext context;
+
+int buf_compute = 0;
+int buf_draw = 0;
+int buf_prime = BUF_COUNT-1;
 
 uint8_t vxldata;
 int key_mxp = 0;
@@ -30,13 +36,16 @@ int key_ryn = 0;
 int key_rxp = 0;
 int key_rxn = 0;
 
-GLuint chunkcull_vao;
-GLuint chunkcull_vbo_data;
-GLuint chunkcull_vbo_indirect;
+GLsync chunkcull_sync[BUF_COUNT];
+GLuint chunkcull_vao[BUF_COUNT];
+GLuint chunkcull_vbo_data[BUF_COUNT];
+GLuint chunkcull_vbo_indirect[BUF_COUNT];
 GLuint chunkcull_vbo_len;
 GLuint chunkcull_vbo_offs;
+GLuint chunkcull_vbo_ymin;
+GLuint chunkcull_vbo_ymax;
 
-GLuint mesh_vao;
+GLuint mesh_vao[BUF_COUNT];
 GLuint mesh_vbo;
 struct cubept {
 	GLuint v,c;
@@ -74,7 +83,7 @@ GLuint tri_mesh_indices[] = {
 #define VXL_LZ 512
 #define VXL_LY 256
 #define VXL_LY_BMASK ((VXL_LY+31)>>5)
-#define VXL_CSIZE 32
+#define VXL_CSIZE 8
 #define VXL_CX ((VXL_LX+VXL_CSIZE-1)/VXL_CSIZE)
 #define VXL_CZ ((VXL_LZ+VXL_CSIZE-1)/VXL_CSIZE)
 uint8_t *vxl_data[VXL_LZ][VXL_LX];
@@ -431,6 +440,8 @@ int main(int argc, char *argv[])
 	show_program_log(base_prog, "PROGRAM LINK");
 	glUseProgram(base_prog);
 
+	mat4x4 Mcam_u[BUF_COUNT];
+	vec4 campos_u[BUF_COUNT];
 	mat4x4 Mproj, Mcam, MA, MB;
 	mat4x4 Mcam_pos;
 	mat4x4 Mcam_roty, Mcam_iroty;
@@ -445,28 +456,16 @@ int main(int argc, char *argv[])
 	mat4x4_translate_in_place(Mcam_pos, -256.5f, -240.0f, -256.5f);
 
 	// Set up main VAO
-	glGenVertexArrays(1, &mesh_vao);
-	glBindVertexArray(mesh_vao);
 	glGenBuffers(1, &mesh_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, mesh_vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(struct cubept)*vxl_cube_count,
 		vxl_mesh_points, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glGenVertexArrays(BUF_COUNT, mesh_vao);
 	GLuint a_vtx = glGetAttribLocation(base_prog, "a_vtx");
 	GLuint a_col = glGetAttribLocation(base_prog, "a_col");
-	glBindBuffer(GL_ARRAY_BUFFER, mesh_vbo);
-	glBindVertexArray(0);
 
 	// Set up chunkcull VAO
-	glGenVertexArrays(1, &chunkcull_vao);
-	glBindVertexArray(chunkcull_vao);
-	glGenBuffers(1, &chunkcull_vbo_data);
-	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(struct cubept)*(vxl_cube_count+1024),
-		NULL, GL_STREAM_COPY);
-	glGenBuffers(1, &chunkcull_vbo_indirect);
-	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_indirect);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*4*VXL_CX*VXL_CZ,
-		NULL, GL_STREAM_COPY);
 	glGenBuffers(1, &chunkcull_vbo_len);
 	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_len);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
@@ -475,26 +474,59 @@ int main(int argc, char *argv[])
 	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_offs);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
 		vxl_chunk_offs, GL_STATIC_DRAW);
+	glGenBuffers(1, &chunkcull_vbo_ymin);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_ymin);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
+		vxl_chunk_ymin, GL_STATIC_DRAW);
+	glGenBuffers(1, &chunkcull_vbo_ymax);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_ymax);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
+		vxl_chunk_ymax, GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, mesh_vbo);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkcull_vbo_len);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, chunkcull_vbo_offs);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunkcull_vbo_data);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, chunkcull_vbo_indirect);
-	glBindVertexArray(0);
+	glGenVertexArrays(BUF_COUNT, chunkcull_vao);
+	glGenBuffers(BUF_COUNT, chunkcull_vbo_data);
+	glGenBuffers(BUF_COUNT, chunkcull_vbo_indirect);
+	for(i = 0; i < BUF_COUNT; i++) {
+		glBindVertexArray(chunkcull_vao[i]);
+		printf("C%d = %d %d %d\n", i
+			, chunkcull_vao[i]
+			, chunkcull_vbo_data[i]
+			, chunkcull_vbo_indirect[i]
+			);
+		glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data[i]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(struct cubept)*3*6*(vxl_cube_count),
+			NULL, GL_STREAM_COPY);
+		glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_indirect[i]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*4*VXL_CX*VXL_CZ,
+			NULL, GL_STREAM_COPY);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, mesh_vbo);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkcull_vbo_len);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, chunkcull_vbo_offs);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunkcull_vbo_data[i]);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, chunkcull_vbo_indirect[i]);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, chunkcull_vbo_ymin);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, chunkcull_vbo_ymax);
+		glBindVertexArray(0);
+	}
 
 	// Adjust main VAO
-	glBindVertexArray(mesh_vao);
-	glBindBuffer(GL_DRAW_INDIRECT_BUFFER, chunkcull_vbo_indirect);
-	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data);
-	//glBindBuffer(GL_ARRAY_BUFFER, mesh_vbo);
-	glVertexAttribPointer(a_vtx, 4, GL_UNSIGNED_INT_2_10_10_10_REV, GL_FALSE, sizeof(struct cubept),
-		&(((struct cubept *)0)->v));
-	glVertexAttribPointer(a_col, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(struct cubept),
-		&(((struct cubept *)0)->c));
-	glEnableVertexAttribArray(a_vtx);
-	glEnableVertexAttribArray(a_col);
-	glBindVertexArray(0);
+	for(i = 0; i < BUF_COUNT; i++) {
+		glBindVertexArray(mesh_vao[i]);
+		printf("M%d = %d\n", i
+			, mesh_vao[i]
+			);
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, chunkcull_vbo_indirect[i]);
+		glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data[i]);
+		//glBindBuffer(GL_ARRAY_BUFFER, mesh_vbo);
+		glVertexAttribPointer(a_vtx, 4, GL_UNSIGNED_INT_2_10_10_10_REV, GL_FALSE, sizeof(struct cubept),
+			&(((struct cubept *)0)->v));
+		glVertexAttribPointer(a_col, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(struct cubept),
+			&(((struct cubept *)0)->c));
+		glEnableVertexAttribArray(a_vtx);
+		glEnableVertexAttribArray(a_col);
+		glBindVertexArray(0);
+	}
 
 	glClearColor(
 		192.0f/255.0f,
@@ -557,10 +589,6 @@ int main(int argc, char *argv[])
 		mat4x4_mul(MA, Mcam_iroty, Mcam_irotx);
 		mat4x4_mul_vec4(svecB, MA, svecA);
 		mat4x4_mul_vec4(dvecB, MA, dvecA);
-		float ddvec = sqrtf(0.0f
-			+ dvecB[0]*dvecB[0]
-			//+ dvecB[1]*dvecB[1]
-			+ dvecB[2]*dvecB[2]);
 
 		mat4x4_translate_in_place(Mcam_pos, svecB[0], svecB[1], svecB[2]);
 		mat4x4_mul(MA, Mcam_rotx, Mcam_roty);
@@ -575,74 +603,56 @@ int main(int argc, char *argv[])
 		if(cz1 < 0) { cz1 = 0; }
 		if(cz2 >= VXL_CZ) { cz2 = VXL_CZ; }
 
+		memcpy(Mcam_u[buf_compute], Mcam, sizeof(mat4x4));
+		memcpy(campos_u[buf_compute], pvecB, sizeof(vec4));
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glUseProgram(chunkcull_prog);
-		glUniformMatrix4fv(glGetUniformLocation(chunkcull_prog, "Mproj"), 1, GL_FALSE, Mproj[0]);
+		glUniformMatrix4fv(glGetUniformLocation(chunkcull_prog, "Mproj"),
+			1, GL_FALSE, Mproj[0]);
 
-		glUniformMatrix4fv(glGetUniformLocation(chunkcull_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
-		glUniform3fv(glGetUniformLocation(chunkcull_prog, "campos"), 1, pvecB);
-		glBindVertexArray(chunkcull_vao);
+		glUniformMatrix4fv(glGetUniformLocation(chunkcull_prog, "Mcam"),
+			1, GL_FALSE, Mcam_u[buf_compute][0]);
+		glUniform3fv(glGetUniformLocation(chunkcull_prog, "campos"),
+			1, campos_u[buf_compute]);
+		glBindVertexArray(chunkcull_vao[buf_compute]);
 		glDispatchCompute(VXL_CX, VXL_CZ, 1);
-		glFinish(); // MANDATORY - otherwise things break HORRIBLY!
-		glUseProgram(base_prog);
-		glBindVertexArray(mesh_vao);
-		glUniformMatrix4fv(glGetUniformLocation(base_prog, "Mproj"), 1, GL_FALSE, Mproj[0]);
-		glUniformMatrix4fv(glGetUniformLocation(base_prog, "Mcam"), 1, GL_FALSE, Mcam[0]);
-		glUniform3fv(glGetUniformLocation(base_prog, "campos"), 1, pvecB);
-		int cx, cz;
-		for(cz = cz1; cz < cz2; cz++) {
-			int czdiff = (cz-ccz);
-			int xrad = xradtab[VXL_CX+czdiff];
-			int cx1 = ccx - xrad;
-			int cx2 = ccx + xrad + 1;
-			if(cx1 < 0) { cx1 = 0; }
-			if(cx2 >= VXL_CX) { cx2 = VXL_CX; }
-			if(cx1 >= cx2) { continue; }
+		chunkcull_sync[buf_compute] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+		buf_compute = (buf_compute+1) % BUF_COUNT;
+		//glFinish(); // MANDATORY - otherwise things break HORRIBLY!
 
-			for(cx = cx1; cx < cx2; cx++) {
-				float fx1 = (cx+0)*VXL_CSIZE;
-				float fz1 = (cz+0)*VXL_CSIZE;
-				float fx2 = (cx+1)*VXL_CSIZE;
-				float fz2 = (cz+1)*VXL_CSIZE;
-				if(0 && !(1
-					&& fx1-VXL_CSIZE <= pvecB[0]
-					&& pvecB[0] <= fx2+VXL_CSIZE
-					&& fz1-VXL_CSIZE <= pvecB[2]
-					&& pvecB[2] <= fz2+VXL_CSIZE
-					)) {
-					float dx1 = fx1-pvecB[0];
-					float dz1 = fz1-pvecB[0];
-					float dx2 = fx2-pvecB[2];
-					float dz2 = fz2-pvecB[2];
+		if(buf_prime > 0) {
+			buf_prime--;
+		} else {
+			glUseProgram(base_prog);
+			glBindVertexArray(mesh_vao[buf_draw]);
+			glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data[buf_draw]);
+			glUniformMatrix4fv(glGetUniformLocation(base_prog, "Mproj"),
+				1, GL_FALSE, Mproj[0]);
+			glUniformMatrix4fv(glGetUniformLocation(base_prog, "Mcam"),
+				1, GL_FALSE, Mcam_u[buf_draw][0]);
+			glUniform3fv(glGetUniformLocation(base_prog, "campos"),
+				1, campos_u[buf_draw]);
 
-					float d11 = sqrtf(dx1*dx1 + dz1*dz1)*ddvec;
-					float d12 = sqrtf(dx1*dx1 + dz2*dz2)*ddvec;
-					float d21 = sqrtf(dx2*dx2 + dz1*dz1)*ddvec;
-					float d22 = sqrtf(dx2*dx2 + dz2*dz2)*ddvec;
+			glWaitSync(chunkcull_sync[buf_draw], 0, GL_TIMEOUT_IGNORED);
+			glDeleteSync(chunkcull_sync[buf_draw]);
 
-					float a11 = (dvecB[0]*dx1 + dvecB[2]*dz1)/d11;
-					float a12 = (dvecB[0]*dx1 + dvecB[2]*dz2)/d12;
-					float a21 = (dvecB[0]*dx2 + dvecB[2]*dz1)/d21;
-					float a22 = (dvecB[0]*dx2 + dvecB[2]*dz2)/d22;
+			int cx, cz;
+			for(cz = cz1; cz < cz2; cz++) {
+				int czdiff = (cz-ccz);
+				int xrad = xradtab[VXL_CX+czdiff];
+				int cx1 = ccx - xrad;
+				int cx2 = ccx + xrad + 1;
+				if(cx1 < 0) { cx1 = 0; }
+				if(cx2 >= VXL_CX) { cx2 = VXL_CX; }
+				if(cx1 >= cx2) { continue; }
 
-					float a1 = (a11 > a12 ? a11 : a12);
-					float a2 = (a21 > a22 ? a21 : a22);
-					float amax = (a1 > a2 ? a1 : a2);
-					if(amax < 0.5f) {
-						continue;
-					}
+				for(cx = cx1; cx < cx2; cx++) {
+					glDrawArraysIndirect(GL_TRIANGLES, &(((GLuint *)0)[4*(cx+cz*VXL_CZ)]));
 				}
-
-				glDrawArraysIndirect(GL_POINTS, &(((GLuint *)0)[4*(cx+cz*VXL_CZ)]));
-
-				//int cpos = vxl_chunk_offs[cz][cx];
-				//int clen = vxl_chunk_len[cz][cx];
-				//if(clen > 0) {
-					//glDrawArrays(GL_POINTS, cpos, clen);
-				//}
 			}
+			glBindVertexArray(0);
+			buf_draw = (buf_draw+1) % BUF_COUNT;
 		}
-		glBindVertexArray(0);
 
 		SDL_GL_SwapWindow(window);
 		usleep(100);
