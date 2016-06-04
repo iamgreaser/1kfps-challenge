@@ -10,19 +10,14 @@ uniform vec3 campos;
 
 struct st_data { uint v, c; };
 struct st_instance { int count, icount, first, ifirst; };
+struct st_chunk { int len, offs, ymin, ymax; };
 
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-layout(std430, binding=0) buffer buf_data_in {
-	st_data data_in[]; };
-layout(std430, binding=1) buffer buf_len_in { int len_in[]; };
-layout(std430, binding=2) buffer buf_offs_in { int offs_in[]; };
-layout(std430, binding=3) buffer buf_data_out {
-	st_data data_out[]; };
-layout(std430, binding=4) buffer buf_indirect_out {
-	st_instance indirect_out[]; };
-layout(std430, binding=5) buffer buf_ymin_in { int ymin_in[]; };
-layout(std430, binding=6) buffer buf_ymax_in { int ymax_in[]; };
+layout(std430, binding=0) buffer buf_data_in { st_data data_in[]; };
+layout(std430, binding=1) buffer buf_chunk_in { st_chunk chunk_in[]; };
+layout(std430, binding=2) buffer buf_data_out { st_data data_out[]; };
+layout(std430, binding=3) buffer buf_indirect_out { st_instance indirect_out[]; };
 
 const float shade_xn = 0.9;
 const float shade_xp = 0.7;
@@ -39,9 +34,9 @@ void main()
 	int cz = int(gl_WorkGroupID.y);
 
 	int cidx = cx + VXL_CX*cz;
-	int dlen  = len_in [cidx];
-	int doffs = offs_in[cidx];
-	int poffs = doffs*3*3;
+	int dlen  = chunk_in[cidx].len;
+	int doffs = chunk_in[cidx].offs;
+	int poffs = doffs*3;
 
 	int di = poffs;
 
@@ -53,8 +48,8 @@ void main()
 
 	float xratio = (Mproj * vec4(1.0, 0.0, 0.0, 0.0)).x;
 	float yratio = (Mproj * vec4(0.0, 1.0, 0.0, 0.0)).y;
-	vec3 cbox0 = vec3(cx*VXL_CSIZE, 255-ymax_in[cidx], cz*VXL_CSIZE);
-	vec3 cbox1 = vec3((cx+1)*VXL_CSIZE, 257-ymin_in[cidx], (cz+1)*VXL_CSIZE);
+	vec3 cbox0 = vec3(cx*VXL_CSIZE, 253-chunk_in[cidx].ymax, cz*VXL_CSIZE);
+	vec3 cbox1 = vec3((cx+1)*VXL_CSIZE, 259-chunk_in[cidx].ymin, (cz+1)*VXL_CSIZE);
 	vec4 cplane0 = vec4(-xratio, 0.0, 1.0, 0.0);
 	vec4 cplane1 = vec4( 0.0,-yratio, 1.0, 0.0);
 	vec4 cplane2 = vec4( xratio, 0.0, 1.0, 0.0);
@@ -134,87 +129,33 @@ void main()
 			float pface = 0.0;
 
 			if((sidevec.x > pface && (nmask & 0x01) != 0)) {
-				st_data p0 = p, p1 = p, p2 = p, p3 = p;
-				p0.v += (0U<<0U)+(0U<<10U)+(0U<<20U);
-				p1.v += (0U<<0U)+(0U<<10U)+(1U<<20U);
-				p2.v += (0U<<0U)+(1U<<10U)+(0U<<20U);
-				p3.v += (0U<<0U)+(1U<<10U)+(1U<<20U);
-				data_out[di++] = p0;
-				data_out[di++] = p1;
-				data_out[di++] = p2;
-				//data_out[di++] = p3;
-				//data_out[di++] = p2;
-				//data_out[di++] = p1;
+				p.c = (p.c&0xFFFFFFU)|(0U<<24);
+				data_out[di++] = p;
 			}
 
 			if((sidevec.y > pface && (nmask & 0x02) != 0)) {
-				st_data p0 = p, p1 = p, p2 = p, p3 = p;
-				p0.v += (0U<<0U)+(0U<<10U)+(0U<<20U);
-				p1.v += (1U<<0U)+(0U<<10U)+(0U<<20U);
-				p2.v += (0U<<0U)+(0U<<10U)+(1U<<20U);
-				p3.v += (1U<<0U)+(0U<<10U)+(1U<<20U);
-				data_out[di++] = p0;
-				data_out[di++] = p1;
-				data_out[di++] = p2;
-				//data_out[di++] = p3;
-				//data_out[di++] = p2;
-				//data_out[di++] = p1;
+				p.c = (p.c&0xFFFFFFU)|(1U<<24);
+				data_out[di++] = p;
 			}
 
 			if((sidevec.z > pface && (nmask & 0x04) != 0)) {
-				st_data p0 = p, p1 = p, p2 = p, p3 = p;
-				p0.v += (0U<<0U)+(0U<<10U)+(0U<<20U);
-				p1.v += (0U<<0U)+(1U<<10U)+(0U<<20U);
-				p2.v += (1U<<0U)+(0U<<10U)+(0U<<20U);
-				p3.v += (1U<<0U)+(1U<<10U)+(0U<<20U);
-				data_out[di++] = p0;
-				data_out[di++] = p1;
-				data_out[di++] = p2;
-				//data_out[di++] = p3;
-				//data_out[di++] = p2;
-				//data_out[di++] = p1;
+				p.c = (p.c&0xFFFFFFU)|(2U<<24);
+				data_out[di++] = p;
 			}
 
 			if((sidevec.x < nface && (nmask & 0x08) != 0)) {
-				st_data p0 = p, p1 = p, p2 = p, p3 = p;
-				p0.v += (1U<<0U)+(0U<<10U)+(0U<<20U);
-				p1.v += (1U<<0U)+(1U<<10U)+(0U<<20U);
-				p2.v += (1U<<0U)+(0U<<10U)+(1U<<20U);
-				p3.v += (1U<<0U)+(1U<<10U)+(1U<<20U);
-				data_out[di++] = p0;
-				data_out[di++] = p1;
-				data_out[di++] = p2;
-				//data_out[di++] = p3;
-				//data_out[di++] = p2;
-				//data_out[di++] = p1;
+				p.c = (p.c&0xFFFFFFU)|(3U<<24);
+				data_out[di++] = p;
 			}
 
 			if((sidevec.y < nface && (nmask & 0x10) != 0)) {
-				st_data p0 = p, p1 = p, p2 = p, p3 = p;
-				p0.v += (0U<<0U)+(1U<<10U)+(0U<<20U);
-				p1.v += (0U<<0U)+(1U<<10U)+(1U<<20U);
-				p2.v += (1U<<0U)+(1U<<10U)+(0U<<20U);
-				p3.v += (1U<<0U)+(1U<<10U)+(1U<<20U);
-				data_out[di++] = p0;
-				data_out[di++] = p1;
-				data_out[di++] = p2;
-				//data_out[di++] = p3;
-				//data_out[di++] = p2;
-				//data_out[di++] = p1;
+				p.c = (p.c&0xFFFFFFU)|(4U<<24);
+				data_out[di++] = p;
 			}
 
 			if((sidevec.z < nface && (nmask & 0x20) != 0)) {
-				st_data p0 = p, p1 = p, p2 = p, p3 = p;
-				p0.v += (0U<<0U)+(0U<<10U)+(1U<<20U);
-				p1.v += (1U<<0U)+(0U<<10U)+(1U<<20U);
-				p2.v += (0U<<0U)+(1U<<10U)+(1U<<20U);
-				p3.v += (1U<<0U)+(1U<<10U)+(1U<<20U);
-				data_out[di++] = p0;
-				data_out[di++] = p1;
-				data_out[di++] = p2;
-				//data_out[di++] = p3;
-				//data_out[di++] = p2;
-				//data_out[di++] = p1;
+				p.c = (p.c&0xFFFFFFU)|(5U<<24);
+				data_out[di++] = p;
 			}
 		}
 	}

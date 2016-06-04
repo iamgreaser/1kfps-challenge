@@ -1,6 +1,6 @@
 #version 400
 
-layout(triangles) in;
+layout(points) in;
 //layout(invocations = 1) in;
 layout(triangle_strip, max_vertices = 4) out;
 
@@ -21,29 +21,73 @@ uniform vec3 campos;
 //const vec3[] INVALID1 = vec3[]({1.0, 2.0, 3.0}, {4.0, 5.0, 6.0});
 
 uniform mat4 Mproj, Mcam;
-in vec3 v_col[3];
-in int v_nmask[3];
+in vec3 v_col[1];
+in int v_nmask[1];
 out vec3 g_col;
 out vec3 g_wnorm;
 out vec3 g_wpos;
 
+void dopoint(vec3 bpos)
+{
+	gl_Position = Mproj * Mcam * vec4(bpos, 1.0);
+	g_wpos = bpos;
+	EmitVertex();
+}
+
 void main()
 {
-	vec3 p0 = gl_in[0].gl_Position.xyz;
-	vec3 p1 = gl_in[1].gl_Position.xyz;
-	vec3 p2 = gl_in[2].gl_Position.xyz;
-	g_wnorm = cross(p1-p0, p2-p0);
+	g_col = v_col[0];
+	vec3 bpos = gl_in[0].gl_Position.xyz;
+	int nmask = v_nmask[0];
+	switch(nmask) {
+		case 0U:
+			g_wnorm = vec3(-1.0, 0.0, 0.0);
+			dopoint(bpos + vec3(0.0, 0.0, 0.0));
+			dopoint(bpos + vec3(0.0, 0.0, 1.0));
+			dopoint(bpos + vec3(0.0, 1.0, 0.0));
+			dopoint(bpos + vec3(0.0, 1.0, 1.0));
+			break;
 
-	for(int i = 0; i < 3; i++) {
-		vec3 bpos = gl_in[i].gl_Position.xyz;
-		gl_Position = Mproj * Mcam * gl_in[i].gl_Position;
-		g_col = v_col[i];
-		g_wpos = bpos;
-		EmitVertex();
+		case 1U:
+			g_wnorm = vec3( 0.0,-1.0, 0.0);
+			dopoint(bpos + vec3(0.0, 0.0, 0.0));
+			dopoint(bpos + vec3(1.0, 0.0, 0.0));
+			dopoint(bpos + vec3(0.0, 0.0, 1.0));
+			dopoint(bpos + vec3(1.0, 0.0, 1.0));
+			break;
+
+		case 2U:
+			g_wnorm = vec3( 0.0, 0.0,-1.0);
+			dopoint(bpos + vec3(0.0, 0.0, 0.0));
+			dopoint(bpos + vec3(0.0, 1.0, 0.0));
+			dopoint(bpos + vec3(1.0, 0.0, 0.0));
+			dopoint(bpos + vec3(1.0, 1.0, 0.0));
+			break;
+
+		case 3U:
+			g_wnorm = vec3( 1.0, 0.0, 0.0);
+			dopoint(bpos + vec3(1.0, 0.0, 0.0));
+			dopoint(bpos + vec3(1.0, 1.0, 0.0));
+			dopoint(bpos + vec3(1.0, 0.0, 1.0));
+			dopoint(bpos + vec3(1.0, 1.0, 1.0));
+			break;
+
+		case 4U:
+			g_wnorm = vec3( 0.0, 1.0, 0.0);
+			dopoint(bpos + vec3(0.0, 1.0, 0.0));
+			dopoint(bpos + vec3(0.0, 1.0, 1.0));
+			dopoint(bpos + vec3(1.0, 1.0, 0.0));
+			dopoint(bpos + vec3(1.0, 1.0, 1.0));
+			break;
+
+		case 5U:
+			g_wnorm = vec3( 0.0, 0.0, 1.0);
+			dopoint(bpos + vec3(0.0, 0.0, 1.0));
+			dopoint(bpos + vec3(1.0, 0.0, 1.0));
+			dopoint(bpos + vec3(0.0, 1.0, 1.0));
+			dopoint(bpos + vec3(1.0, 1.0, 1.0));
+			break;
 	}
-	g_wpos = p1+p2-p0;
-	gl_Position = Mproj * Mcam * vec4(p1+p2-p0, 1.0);
-	EmitVertex();
 }
 
 

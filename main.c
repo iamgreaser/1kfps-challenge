@@ -40,13 +40,13 @@ GLsync chunkcull_sync[BUF_COUNT];
 GLuint chunkcull_vao[BUF_COUNT];
 GLuint chunkcull_vbo_data[BUF_COUNT];
 GLuint chunkcull_vbo_indirect[BUF_COUNT];
-GLuint chunkcull_vbo_len;
-GLuint chunkcull_vbo_offs;
-GLuint chunkcull_vbo_ymin;
-GLuint chunkcull_vbo_ymax;
+GLuint chunkcull_vbo_chunk;
 
 GLuint mesh_vao[BUF_COUNT];
 GLuint mesh_vbo;
+struct chunkpt {
+	GLint len, offs, ymin, ymax;
+};
 struct cubept {
 	GLuint v,c;
 };
@@ -88,10 +88,7 @@ GLuint tri_mesh_indices[] = {
 #define VXL_CZ ((VXL_LZ+VXL_CSIZE-1)/VXL_CSIZE)
 uint8_t *vxl_data[VXL_LZ][VXL_LX];
 int vxl_data_len[VXL_LZ][VXL_LX];
-int vxl_chunk_offs[VXL_CZ][VXL_CX];
-int vxl_chunk_len[VXL_CZ][VXL_CX];
-int vxl_chunk_ymin[VXL_CZ][VXL_CX];
-int vxl_chunk_ymax[VXL_CZ][VXL_CX];
+struct chunkpt vxl_chunk[VXL_CZ][VXL_CX];
 uint32_t vxl_data_bitmasks[VXL_LZ][VXL_LX][VXL_LY_BMASK];
 
 int vxl_cube_count = 0;
@@ -295,7 +292,7 @@ void load_vxl(const char *fname)
 	
 	for(cz = 0; cz < VXL_CZ; cz++) {
 	for(cx = 0; cx < VXL_CX; cx++) {
-		vxl_chunk_offs[cz][cx] = mi;
+		vxl_chunk[cz][cx].offs = mi;
 		int cymin = 255;
 		int cymax = 0;
 	for(z = cz*VXL_CSIZE; z < (cz+1)*VXL_CSIZE; z++) {
@@ -382,9 +379,9 @@ void load_vxl(const char *fname)
 		}
 	}
 	}
-		vxl_chunk_len[cz][cx] = mi - vxl_chunk_offs[cz][cx];
-		vxl_chunk_ymin[cz][cx] = cymin;
-		vxl_chunk_ymax[cz][cx] = cymax;
+		vxl_chunk[cz][cx].len = mi - vxl_chunk[cz][cx].offs;
+		vxl_chunk[cz][cx].ymin = cymin;
+		vxl_chunk[cz][cx].ymax = cymax;
 	}
 	}
 
@@ -466,47 +463,32 @@ int main(int argc, char *argv[])
 	GLuint a_col = glGetAttribLocation(base_prog, "a_col");
 
 	// Set up chunkcull VAO
-	glGenBuffers(1, &chunkcull_vbo_len);
-	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_len);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
-		vxl_chunk_len, GL_STATIC_DRAW);
-	glGenBuffers(1, &chunkcull_vbo_offs);
-	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_offs);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
-		vxl_chunk_offs, GL_STATIC_DRAW);
-	glGenBuffers(1, &chunkcull_vbo_ymin);
-	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_ymin);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
-		vxl_chunk_ymin, GL_STATIC_DRAW);
-	glGenBuffers(1, &chunkcull_vbo_ymax);
-	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_ymax);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*VXL_CX*VXL_CZ,
-		vxl_chunk_ymax, GL_STATIC_DRAW);
+	glGenBuffers(1, &chunkcull_vbo_chunk);
+	glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_chunk);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*4*VXL_CX*VXL_CZ,
+		vxl_chunk, GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glGenVertexArrays(BUF_COUNT, chunkcull_vao);
-	glGenBuffers(BUF_COUNT, chunkcull_vbo_data);
-	glGenBuffers(BUF_COUNT, chunkcull_vbo_indirect);
 	for(i = 0; i < BUF_COUNT; i++) {
+		glGenBuffers(1, &chunkcull_vbo_data[i]);
+		glGenBuffers(1, &chunkcull_vbo_indirect[i]);
 		glBindVertexArray(chunkcull_vao[i]);
-		printf("C%d = %d %d %d\n", i
-			, chunkcull_vao[i]
-			, chunkcull_vbo_data[i]
-			, chunkcull_vbo_indirect[i]
-			);
 		glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data[i]);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(struct cubept)*3*6*(vxl_cube_count),
+		glBufferData(GL_ARRAY_BUFFER, sizeof(struct cubept)*3*(vxl_cube_count),
 			NULL, GL_STREAM_COPY);
 		glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_indirect[i]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(GLuint)*4*VXL_CX*VXL_CZ,
 			NULL, GL_STREAM_COPY);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		printf("C%d = %d %d %d\n", i
+			, chunkcull_vao[i]
+			, chunkcull_vbo_data[i]
+			, chunkcull_vbo_indirect[i]
+			);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, mesh_vbo);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkcull_vbo_len);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, chunkcull_vbo_offs);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunkcull_vbo_data[i]);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, chunkcull_vbo_indirect[i]);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, chunkcull_vbo_ymin);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, chunkcull_vbo_ymax);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, chunkcull_vbo_chunk);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, chunkcull_vbo_data[i]);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, chunkcull_vbo_indirect[i]);
 		glBindVertexArray(0);
 	}
 
@@ -625,6 +607,7 @@ int main(int argc, char *argv[])
 		} else {
 			glUseProgram(base_prog);
 			glBindVertexArray(mesh_vao[buf_draw]);
+			glBindBuffer(GL_DRAW_INDIRECT_BUFFER, chunkcull_vbo_indirect[buf_draw]);
 			glBindBuffer(GL_ARRAY_BUFFER, chunkcull_vbo_data[buf_draw]);
 			glUniformMatrix4fv(glGetUniformLocation(base_prog, "Mproj"),
 				1, GL_FALSE, Mproj[0]);
@@ -647,7 +630,7 @@ int main(int argc, char *argv[])
 				if(cx1 >= cx2) { continue; }
 
 				for(cx = cx1; cx < cx2; cx++) {
-					glDrawArraysIndirect(GL_TRIANGLES, &(((GLuint *)0)[4*(cx+cz*VXL_CZ)]));
+					glDrawArraysIndirect(GL_POINTS, &(((GLuint *)0)[4*(cx+cz*VXL_CZ)]));
 				}
 			}
 			glBindVertexArray(0);
