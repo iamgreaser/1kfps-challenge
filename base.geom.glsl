@@ -1,11 +1,11 @@
-#version 400
+#version 330
 
 layout(points) in;
-layout(invocations = 1) in;
+//layout(invocations = 1) in;
 layout(triangle_strip, max_vertices = 12) out;
 
 const bool CULL_FACE = true; // control inner-face culling
-const bool INSTANCED = false; // enable GS instancing (gl_InvocationID, not gl_InstanceID)
+//const bool INSTANCED = false; // enable GS instancing (gl_InvocationID, not gl_InstanceID)
 
 uniform vec3 campos;
 
@@ -87,7 +87,7 @@ void main()
 		float shade_y = shade_yn;
 		float shade_z = shade_zn;
 
-		if((!INSTANCED)  || gl_InvocationID == 0) {
+		//if((!INSTANCED)  || gl_InvocationID == 0) {
 		if((!CULL_FACE) || (nmask & 0x01) != 0) {
 	if((nmask & 0x08) != 0) { nvx = -nvx; shade_x = shade_xp; }
 	g_col = bcol * shade_x;
@@ -104,9 +104,9 @@ void main()
 	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
 	EndPrimitive();
 		}
-		}
+		//}
 
-		if((!INSTANCED)  || gl_InvocationID == 1) {
+		//if((!INSTANCED)  || gl_InvocationID == 1) {
 		if((!CULL_FACE) || (nmask & 0x02) != 0) {
 	if((nmask & 0x10) != 0) { nvy = -nvy; shade_y = shade_yp; }
 	g_col = bcol * shade_y;
@@ -123,9 +123,9 @@ void main()
 	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
 	EndPrimitive();
 		}
-		}
+		//}
 
-		if((!INSTANCED)  || gl_InvocationID == 2) {
+		//if((!INSTANCED)  || gl_InvocationID == 2) {
 		if((!CULL_FACE) || (nmask & 0x04) != 0) {
 	if((nmask & 0x20) != 0) { nvz = -nvz; shade_z = shade_zp; }
 	g_col = bcol * shade_z;
@@ -142,7 +142,7 @@ void main()
 	gl_Position = Mproj * Mcam * vec4(ppos, 1.0); EmitVertex();
 	EndPrimitive();
 		}
-		}
+		//}
 	}
 }
 

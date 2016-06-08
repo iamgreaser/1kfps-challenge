@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <errno.h>
 
+#include <unistd.h>
+
 #include <math.h>
 
 #include <epoxy/gl.h>
@@ -366,8 +368,8 @@ void load_vxl(const char *fname)
 	}
 	}
 		vxl_chunk_len[cz][cx] = mi - vxl_chunk_offs[cz][cx];
-		vxl_chunk_ymin[cz][cx] = cymin;
-		vxl_chunk_ymax[cz][cx] = cymax;
+		vxl_chunk_ymin[cz][cx] = 256-cymin;
+		vxl_chunk_ymax[cz][cx] = 256-cymax;
 	}
 	}
 
@@ -376,7 +378,7 @@ void load_vxl(const char *fname)
 
 int main(int argc, char *argv[])
 {
-	int i;
+	int i, j;
 
 	SDL_assert_release(argc > 1);
 
@@ -549,31 +551,46 @@ int main(int argc, char *argv[])
 				float fz1 = (cz+0)*VXL_CSIZE;
 				float fx2 = (cx+1)*VXL_CSIZE;
 				float fz2 = (cz+1)*VXL_CSIZE;
-				if(0 && !(1
-					&& fx1-VXL_CSIZE <= pvecB[0]
-					&& pvecB[0] <= fx2+VXL_CSIZE
-					&& fz1-VXL_CSIZE <= pvecB[2]
-					&& pvecB[2] <= fz2+VXL_CSIZE
-					)) {
-					float dx1 = fx1-pvecB[0];
-					float dz1 = fz1-pvecB[0];
-					float dx2 = fx2-pvecB[2];
-					float dz2 = fz2-pvecB[2];
+				float fy1 = vxl_chunk_ymin[cz][cx];
+				float fy2 = vxl_chunk_ymax[cz][cx];
+				if(1) {
+					float frust_x = Mproj[0][0];
+					float frust_y = Mproj[1][1];
 
-					float d11 = sqrtf(dx1*dx1 + dz1*dz1)*ddvec;
-					float d12 = sqrtf(dx1*dx1 + dz2*dz2)*ddvec;
-					float d21 = sqrtf(dx2*dx2 + dz1*dz1)*ddvec;
-					float d22 = sqrtf(dx2*dx2 + dz2*dz2)*ddvec;
+					vec4 vp[4] = {
+						{-frust_x, 0.0f,-1.0f,0.0f},
+						{ 0.0f,-frust_y,-1.0f,0.0f},
+						{ frust_x, 0.0f,-1.0f,0.0f},
+						{ 0.0f, frust_y,-1.0f,0.0f},
+					};
 
-					float a11 = (dvecB[0]*dx1 + dvecB[2]*dz1)/d11;
-					float a12 = (dvecB[0]*dx1 + dvecB[2]*dz2)/d12;
-					float a21 = (dvecB[0]*dx2 + dvecB[2]*dz1)/d21;
-					float a22 = (dvecB[0]*dx2 + dvecB[2]*dz2)/d22;
+					vec4 vc[8];
+					for(i = 0; i < 8; i++) {
+						vec4 vt1;
+						vt1[0] = ((i&1)==0 ? fx1 : fx2);
+						vt1[1] = ((i&2)==0 ? fy1 : fy2);
+						vt1[2] = ((i&4)==0 ? fz1 : fz2);
+						vt1[3] = 1.0f;
+						mat4x4_mul_vec4(vc[i], Mcam, vt1);
+					}
 
-					float a1 = (a11 > a12 ? a11 : a12);
-					float a2 = (a21 > a22 ? a21 : a22);
-					float amax = (a1 > a2 ? a1 : a2);
-					if(amax < 0.5f) {
+					// TODO: fast delta-based version
+
+					int all_outside = 0;
+					for(i = 0; i < 4 && !all_outside; i++) {
+						int any_inside = 0;
+
+						for(j = 0; j < 8 && !any_inside; j++) {
+							float d = vec4_mul_inner(vp[i], vc[j]);
+							any_inside = (d > 0.0f);
+						}
+
+						if(!any_inside) {
+							all_outside = 1;
+						}
+					}
+
+					if(all_outside) {
 						continue;
 					}
 				}
