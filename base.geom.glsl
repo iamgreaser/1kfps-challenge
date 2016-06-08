@@ -1,4 +1,4 @@
-#version 330
+#version 150
 
 layout(points) in;
 //layout(invocations = 1) in;

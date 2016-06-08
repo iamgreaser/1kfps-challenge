@@ -1,4 +1,4 @@
-#version 330
+#version 150
 
 const float FOG_LIMIT = 128.0;
 

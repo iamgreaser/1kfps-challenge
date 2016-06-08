@@ -1,4 +1,4 @@
-#version 330
+#version 150
 //extension GL_ARB_cull_distance: require
 
 const float FOG_LIMIT = 128.0;
